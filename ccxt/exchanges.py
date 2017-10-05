@@ -66,6 +66,7 @@ exchanges = [
     'bittrex',
     'bl3p',
     'bleutrade',
+    'btcbox',
     'btcchina',
     'btcexchange',
     'btcmarkets',
@@ -5512,6 +5513,110 @@ class bleutrade (bittrex):
         }, params))
         orderbook = response['result']
         return self.parse_order_book(orderbook, None, 'buy', 'sell', 'Rate', 'Quantity')
+
+# -----------------------------------------------------------------------------
+
+
+class btcbox (Exchange):
+
+    def __init__(self, config={}):
+        params = {
+            'id': 'btcbox',
+            'name': 'BTCBOX',
+            'countries': 'JP',  # Japan
+            'rateLimit': 1000,  # TODO
+            #'version': 'v1',    # TODO
+            'hasCORS': False,
+            'hasFetchTickers': True,
+            'hasFetchOHLCV': False,
+            'urls': {
+                'logo': 'https://user-images.githubusercontent.com/1294454/30303000-b602dbe6-976d-11e7-956d-36c5049c01e7.jpg', # TODO
+                'api': 'https://www.btcbox.co.jp/api/v1',
+                'www': 'https://www.btcbox.co.jp/',
+                'doc': 'https://www.btcbox.co.jp/help/asm',
+            },
+            'api': {
+                'public': {
+                    'get': [
+                        'depth',    # order_books
+                        'ticker',
+                        'order',
+                    ],
+                },
+                'private': {
+                    'post': [
+                        'balance',
+                        'table_view',
+                        'trade_add',
+                        'trade_cancel',
+                        'trade_list',
+                        'wallet',
+                    ],
+                },
+            },
+        }
+        params.update(config)
+        super(btcbox, self).__init__(params)
+
+    def fetch_order_book(self, symbol, params={}):
+        if symbol != 'BTC/JPY':
+            raise NotSupported(self.id + ' fetchTicker() supports BTC/JPY only')
+        orderbook = self.publicGetDepth()
+        return self.parse_order_book(orderbook)
+
+    def fetch_ticker(self, symbol):
+        if symbol != 'BTC/JPY':
+            raise NotSupported(self.id + ' fetchTicker() supports BTC/JPY only')
+        ticker = self.publicGetTicker()
+        timestamp = self.milliseconds()
+        return {
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'high': float(ticker['high']),
+            'low': float(ticker['low']),
+            'bid': float(ticker['buy']),
+            'ask': float(ticker['sell']),
+            'vwap': None,
+            'open': None,
+            'close': None,
+            'first': None,
+            'last': float(ticker['last']),
+            'change': None,
+            'percentage': None,
+            'average': None,
+            'baseVolume': None,
+            'quoteVolume': float(ticker['vol']),
+            'info': ticker,
+        }
+
+    def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
+        url = self.urls['api'] + '/' + self.implode_params(path, params)
+        query = self.omit(params, self.extract_params(path))
+        if api == 'public':
+            if query:
+                url += '?' + self.urlencode(query)
+        else:
+            nonce = str(self.nonce())
+            if query:
+                body = self.urlencode(self.keysort(query))
+            auth = nonce + url + (body or '')
+            headers = {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'ACCESS-KEY': self.apiKey,
+                'ACCESS-NONCE': nonce,
+                'ACCESS-SIGNATURE': self.hmac(self.encode(auth), self.encode(self.secret)),
+            }
+        return {'url': url, 'method': method, 'body': body, 'headers': headers}
+
+    def request(self, path, api='public', method='GET', params={}, headers=None, body=None):
+        response = self.fetch2(path, api, method, params, headers, body)
+        if api == 'public':
+            return response
+        if 'success' in response:
+            if response['success']:
+                return response
+        raise ExchangeError(self.id + ' ' + self.json(response))
+
 
 # -----------------------------------------------------------------------------
 
