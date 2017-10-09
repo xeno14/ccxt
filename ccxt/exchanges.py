@@ -30,6 +30,7 @@ SOFTWARE.
 import base64
 import hashlib
 import math
+import time
 
 # -----------------------------------------------------------------------------
 
@@ -5589,33 +5590,47 @@ class btcbox (Exchange):
             'info': ticker,
         }
 
+    def fetch_balance(self, params={}):
+        balances = self.privatePostBalance()
+        result = {'info': balances}
+        return self.parse_balance(result)
+
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
         url = self.urls['api'] + '/' + self.implode_params(path, params)
         query = self.omit(params, self.extract_params(path))
         if api == 'public':
             if query:
                 url += '?' + self.urlencode(query)
-        else:
+        elif method == 'POST':
             nonce = str(self.nonce())
-            if query:
-                body = self.urlencode(self.keysort(query))
-            auth = nonce + url + (body or '')
+            nonce = str(int(time.time() * 1000000000))
+            query = {"nonce": nonce, "key": self.apiKey}
+            message = self.urlencode(query)
+
+            import hashlib
+            import hmac
+            h = hashlib.md5()
+            h.update(self.secret.encode())
+            hashed_secret_key = h.hexdigest().encode()
+            signature = hmac.new(hashed_secret_key, message.encode(), hashlib.sha256).hexdigest()
+
+            query["signature"] = signature
+            body = self.urlencode(query)
+
             headers = {
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'ACCESS-KEY': self.apiKey,
-                'ACCESS-NONCE': nonce,
-                'ACCESS-SIGNATURE': self.hmac(self.encode(auth), self.encode(self.secret)),
             }
-        return {'url': url, 'method': method, 'body': body, 'headers': headers}
+
+        import pdb; pdb.set_trace()
+        return {'url': url, 'method': method, 'body': body, 'headers': headers, 'params': params}
 
     def request(self, path, api='public', method='GET', params={}, headers=None, body=None):
         response = self.fetch2(path, api, method, params, headers, body)
         if api == 'public':
             return response
-        if 'success' in response:
-            if response['success']:
-                return response
-        raise ExchangeError(self.id + ' ' + self.json(response))
+        if 'result' in response and response['result'] == False:
+            raise ExchangeError(self.id + ' ' + self.json(response))
+        return response
 
 
 # -----------------------------------------------------------------------------
