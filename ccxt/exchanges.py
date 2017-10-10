@@ -29,6 +29,7 @@ SOFTWARE.
 # Python 2 & 3
 import base64
 import hashlib
+import hmac
 import math
 import time
 
@@ -5525,7 +5526,7 @@ class btcbox (Exchange):
             'id': 'btcbox',
             'name': 'BTCBOX',
             'countries': 'JP',  # Japan
-            'rateLimit': 1000,  # TODO
+            #'rateLimit': 1000,  # TODO
             #'version': 'v1',    # TODO
             'hasCORS': False,
             'hasFetchTickers': True,
@@ -5595,6 +5596,53 @@ class btcbox (Exchange):
         result = {'info': balances}
         return self.parse_balance(result)
 
+    def create_order(self, symbol, type, side, amount, price=None, params={}):
+        """
+        Args
+        symbol: dummy
+        type:   dummy
+        side:   'buy' or 'sell'
+        amount: amount
+        price:  BTC/JPY
+
+        Path：https://www.btcbox.co.jp/api/v1/trade_add/
+        Request method：POST
+        Parameters
+            key - API key
+            signature - signature
+            nonce - nonce
+            amount - Total number
+            price
+            type - buy or sell
+        Return JSON dictionary
+            id - ID
+            result - true(success), false(fail)
+        """
+        order = {
+            "amount": amount,
+            "type":   side,
+        }
+        if price is not None:
+            order["price"] = price
+        response = self.privatePostTradeAdd(self.extend(order, params))
+        return {
+            'info': response,
+            'id': str(response['id']),
+        }
+
+    def cancel_order(self, id, symbol=None, params={}):
+        return self.privatePostTradeCancel({'id': int(id)})
+
+    def _urlencode(self, d, keys=None):
+        """Use keys to ensure intended order
+        """
+        if keys is None:
+            keys = d.keys()
+        pieces = []
+        for key in keys:
+            pieces.append("{}={}".format(key, d[key]))
+        return "&".join(pieces)
+
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
         url = self.urls['api'] + '/' + self.implode_params(path, params)
         query = self.omit(params, self.extract_params(path))
@@ -5605,23 +5653,24 @@ class btcbox (Exchange):
             nonce = str(self.nonce())
             nonce = str(int(time.time() * 1000000000))
             query = {"nonce": nonce, "key": self.apiKey}
-            message = self.urlencode(query)
+            query.update(params)
+            keys = list(query.keys())
+            params = {}
+            message = self._urlencode(query, keys)
 
-            import hashlib
-            import hmac
             h = hashlib.md5()
             h.update(self.secret.encode())
             hashed_secret_key = h.hexdigest().encode()
             signature = hmac.new(hashed_secret_key, message.encode(), hashlib.sha256).hexdigest()
 
             query["signature"] = signature
-            body = self.urlencode(query)
+            keys.append("signature")
+            body = self._urlencode(query, keys)
 
             headers = {
                 'Content-Type': 'application/x-www-form-urlencoded',
             }
 
-        import pdb; pdb.set_trace()
         return {'url': url, 'method': method, 'body': body, 'headers': headers, 'params': params}
 
     def request(self, path, api='public', method='GET', params={}, headers=None, body=None):
